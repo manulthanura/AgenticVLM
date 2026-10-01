@@ -17,7 +17,7 @@ clips), `s3_seq1` (29 s, Subject 3 day clips), and one fall clip (GMDCSA-24 Subj
 - **With the agent** (`UNKNOWN_ESCALATE_SEC=5`): the case was escalated (`track_lost`), the VLM call was rejected by Azure's content-safety
   filter ("input image may contain content that is not allowed"), the agent fell back to `UNKNOWN`, confidence 0, and alerting gave `MONITOR`
   (`agent_low_confidence`), not `ALERT`. The safe fallback worked as designed, but it means fall footage may be filtered often.
-- **Update (plan 07):** two changes. (a) The default pose model is now `yolo26s-pose` (raw detections after 5 s on this clip: nano 29/51,
+- **Update:** two changes. (a) The default pose model is now `yolo26s-pose` (raw detections after 5 s on this clip: nano 29/51,
   small 44/51). (b) With the person found, the torso rule still said `SITTING_OUTSIDE_BED`, because someone lying face down toward the
   camera has a torso that looks vertical in the image. A box at least as wide as tall, with hips outside the bed, is now
   `UNKNOWN [lying_outside_bed]`, and this clip gives `ALERT` (`lying_outside_bed`). No false ALERT on four floor-sitting clips
@@ -35,7 +35,7 @@ clips), `s3_seq1` (29 s, Subject 3 day clips), and one fall clip (GMDCSA-24 Subj
   `WALKING_SPEED_MIN` (0.3). Walking partly toward the camera and stride-phase hip movement shrink the measured displacement in image
   space. I did not test other thresholds on purpose: lowering it to fit two short videos would fit those videos, and sway while sitting
   up reaches 0.2-0.3.
-- **Measured (plan 07):** hip speed in the ground-truth walking seconds has median 0.18 (p90 0.27) on `s2_night`, but standing has p90 0.19; on
+- **Measured:** hip speed in the ground-truth walking seconds has median 0.18 (p90 0.27) on `s2_night`, but standing has p90 0.19; on
   `s3_seq1` walking (median 0.07) is slower than standing (0.10). Bounding-box-centre speed is no better. So speed alone does not separate them
   here, and I left the threshold alone rather than fit it to two short videos. A gait signal (alternating knee angles) is the next thing to try.
 - **Cost:** duration split between walking and standing is wrong; bed exit and return are still correct because standing outside the
@@ -55,7 +55,7 @@ clips), `s3_seq1` (29 s, Subject 3 day clips), and one fall clip (GMDCSA-24 Subj
 ## 4. Sit-up boundary is called lying for one second
 - **Where:** `s2_night` 25-26 s, and `UNKNOWN` at 26-28 s (the person swings legs off the bed and stands).
 - **Truth:** `sitting_on_bed`. **Predicted:** `lying_in_bed [reclined]` for the first second, then `UNKNOWN`.
-- **Why:** plan 06 treats a torso at 35° or more with hips inside the bed as lying, because a person propped on a pillow reads 38-52°.
+- **Why:** the classifier treats a torso at 35° or more with hips inside the bed as lying, because a person propped on a pillow reads 38-52°.
   A person rising to sit passes through the same angles, so the label lags by about a second. The following `UNKNOWN` is a fast
   movement with low pose confidence. Both are close to the ±1 s uncertainty in the labels, so I would not tune against them.
 

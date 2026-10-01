@@ -104,7 +104,7 @@ Duration error per state (seconds, predicted vs ground truth; walking time is mo
 How honest are these numbers?
 - **Two short videos, hand-labelled, from two people in one room.** I looked at both while fixing the system, so they are a
   development set, not a held-out test. Treat them as "the pipeline works on these", not as an accuracy claim.
-- **Walking is never detected.** Speed over 1 s does not separate walking from standing on this data (measured in `plans/07`). Durations of
+- **Walking is never detected.** Speed over 1 s does not separate walking from standing on this data (measured on the labelled clips). Durations of
   walking and standing are therefore wrong, but bed exit and return are still found because standing with hips outside the bed counts as exit evidence.
 - **`s3_seq1` misses its bed exit:** a 2 s `UNKNOWN` while the person is at the frame edge breaks the standing run before it reaches the 5 s
   confirmation. With the agent switched on (`UNKNOWN_ESCALATE_SEC=1` to trigger it on a 29 s clip) the agent resolved that segment as `standing`
@@ -113,7 +113,7 @@ How honest are these numbers?
   or land on the bed. One clean fall clip is weak evidence.
 - Metrics, confusion matrices and per-state durations are in each job's `evaluation.json`.
 
-Failure cases with frames and explanations: [docs/failure-cases.md](docs/failure-cases.md). How each fix was decided: `plans/05` to `plans/07`.
+Failure cases with frames and explanations: [docs/failure-cases.md](docs/failure-cases.md).
 
 ![frontend](./assets/01.png)
 
