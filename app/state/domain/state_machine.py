@@ -75,7 +75,7 @@ class StateMachine:
         """A non-current state that filled enough of a full dwell window, and when it first showed up.
 
         Share instead of an unbroken run: two WALKING frames inside a long STANDING run must not
-        restart its clock (see plans/05-state-smoothing.md).
+        restart its clock.
         """
         time_sec = self._recent[-1][0]
         if self._recent[0][0] > time_sec - self._dwell:
