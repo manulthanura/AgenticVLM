@@ -1,0 +1,40 @@
+[project]
+name = "agentic-vlm"
+version = "0.1.0"
+description = "Agentic AI + Vision prototype: elderly bed-monitoring timeline, bed-exit events and alerts"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "pydantic>=2",
+    "pydantic-settings",
+    "ultralytics",
+    "opencv-python",
+    "numpy",
+    "shapely",
+    "openai",
+    "pandas",
+    "scikit-learn",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI declares upload/form parameters as defaults (File(None), Form(None)); that is its normal idiom.
+extend-immutable-calls = ["fastapi.File", "fastapi.Form"]

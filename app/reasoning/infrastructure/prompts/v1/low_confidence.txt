@@ -1,0 +1,1 @@
+The pose analysis could not decide what the person is doing in this period (poor lighting, occlusion or unclear posture). What is the person doing? Answer with the matching state, or unknown if you cannot tell.

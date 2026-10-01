@@ -1,0 +1,1 @@
+The person could not be tracked in this period. Did they walk out of the camera view, or are they still in view but hidden (for example under a blanket, behind furniture or in the dark)? Answer out_of_bed if they left the view. If they are still visible or hidden in the bed, answer the state that matches what you see (for example lying_in_bed).

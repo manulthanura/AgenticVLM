@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgenticVLM</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<main class="mx-auto max-w-5xl space-y-6 p-4">
+  <header class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold">AgenticVLM</h1>
+      <p class="text-sm text-slate-500">Bed-monitoring video analysis: timeline, bed events, alerts, agent traces.</p>
+    </div>
+    <a href="/docs" class="text-sm text-sky-600 hover:underline">Swagger /docs</a>
+  </header>
+
+  <section class="rounded-lg bg-white p-4 shadow">
+    <h2 class="mb-2 font-semibold">Try a demo</h2>
+    <div id="demos" class="grid gap-3 sm:grid-cols-3"></div>
+  </section>
+
+  <!-- Input -->
+  <section class="space-y-3 rounded-lg bg-white p-4 shadow">
+    <div class="grid gap-3 sm:grid-cols-2">
+      <label class="text-sm">Video on server
+        <select id="video" class="mt-1 w-full rounded border p-2"></select></label>
+      <label class="text-sm">Bed polygon
+        <select id="roi" class="mt-1 w-full rounded border p-2"></select></label>
+      <label class="text-sm">...or upload a video
+        <input id="vfile" type="file" accept="video/*" class="mt-1 w-full text-sm"></label>
+      <label class="text-sm">...or upload a bed polygon (JSON)
+        <input id="rfile" type="file" accept=".json" class="mt-1 w-full text-sm"></label>
+    </div>
+    <p class="text-xs text-slate-500">Each camera view needs its own bed polygon. A polygon from another room gives wrong results.</p>
+    <div class="flex items-center gap-3">
+      <button id="run" class="rounded bg-sky-600 px-4 py-2 text-white hover:bg-sky-700 disabled:opacity-50">Analyse</button>
+      <span id="status" class="text-sm text-slate-500"></span>
+    </div>
+    <div class="h-2 overflow-hidden rounded bg-slate-200"><div id="bar" class="h-2 w-0 bg-sky-500 transition-all"></div></div>
+  </section>
+
+  <div id="results" class="hidden space-y-6">
+    <section class="flex flex-wrap items-center gap-4 rounded-lg bg-white p-4 shadow">
+      <span id="decision" class="rounded px-3 py-1 text-lg font-semibold"></span>
+      <div id="cards" class="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4"></div>
+    </section>
+
+    <section class="space-y-3 rounded-lg bg-white p-4 shadow">
+      <h2 class="font-semibold">Timeline <span class="text-sm font-normal text-slate-500">(click the bar, drag the slider or press Play to compare frames with the predicted state)</span></h2>
+      <img id="frame" alt="video frame" class="max-h-96 w-full rounded bg-black object-contain">
+      <div class="flex items-center gap-3 text-sm">
+        <button id="play" class="w-16 rounded bg-slate-700 px-3 py-1 text-white hover:bg-slate-800">Play</button>
+        <input id="scrub" type="range" min="0" step="0.2" value="0" class="flex-1">
+        <span id="at" class="w-72 text-right font-medium"></span>
+      </div>
+      <div class="relative cursor-pointer">
+        <div id="timeline" class="flex h-8 overflow-hidden rounded"></div>
+        <div id="head" class="pointer-events-none absolute top-0 h-8 w-0.5 bg-black"></div>
+      </div>
+      <div id="legend" class="flex flex-wrap gap-3 text-xs"></div>
+      <div id="segments" class="overflow-x-auto"></div>
+    </section>
+
+    <section class="rounded-lg bg-white p-4 shadow"><h2 class="mb-2 font-semibold">Bed events</h2><div id="events"></div></section>
+    <section class="rounded-lg bg-white p-4 shadow"><h2 class="mb-2 font-semibold">Alert decisions</h2><div id="alerts"></div></section>
+    <section class="rounded-lg bg-white p-4 shadow"><h2 class="mb-2 font-semibold">Agent traces</h2><div id="traces"></div></section>
+
+    <section class="space-y-2 rounded-lg bg-white p-4 shadow">
+      <h2 class="font-semibold">Evaluation</h2>
+      <p class="text-sm text-slate-500">Uses data/ground_truth/&lt;video&gt;.csv unless you upload one.</p>
+      <div class="flex items-center gap-3">
+        <input id="gt" type="file" accept=".csv" class="text-sm">
+        <button id="evaluate" class="rounded bg-slate-700 px-3 py-1 text-white hover:bg-slate-800">Evaluate</button>
+      </div>
+      <div id="evaluation"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const API = "/api/v1";
+const $ = (id) => document.getElementById(id);
+const COLORS = {
+  lying_in_bed: "bg-indigo-500", sitting_on_bed: "bg-sky-500", sitting_outside_bed: "bg-cyan-500",
+  standing: "bg-emerald-500", walking: "bg-lime-500", out_of_bed: "bg-amber-500", unknown: "bg-slate-400",
+};
+const DECISIONS = { NORMAL: "bg-emerald-100 text-emerald-800", MONITOR: "bg-amber-100 text-amber-800", ALERT: "bg-red-100 text-red-800" };
+const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (sec) => new Date(sec * 1000).toISOString().slice(11, 19);
+const badge = (d) => `<span class="rounded px-2 py-0.5 text-xs font-semibold ${DECISIONS[d] || ""}">${esc(d)}</span>`;
+const pct = (v) => (v == null ? "-" : `${Math.round(v * 100)}%`);
+
+async function call(path, options) {
+  const res = await fetch(API + path, options);
+  const body = res.headers.get("content-type")?.includes("json") ? await res.json() : await res.text();
+  if (!res.ok) throw new Error(body.detail || body || res.statusText);
+  return body;
+}
+
+const none = (text) => `<p class="text-sm text-slate-500">${text}</p>`;
+const table = (head, rows, empty) => rows.length
+  ? `<table class="w-full text-left text-sm"><thead class="text-slate-500"><tr>${head.map((h) => `<th class="pr-4 font-normal">${h}</th>`).join("")}</tr></thead>
+     <tbody>${rows.map((r) => `<tr class="border-t">${r.map((c) => `<td class="py-1 pr-4">${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`
+  : none(empty);
+
+// Ready-made runs: the right video with the right bed polygon, and what to expect.
+const DEMOS = [
+  { title: "Bed exit and return", video: "s2_night.mp4", roi: "s2_night.json",
+    note: "58 s, night. Expect a bed exit near 0:26 and a return near 0:52, decision MONITOR." },
+  { title: "Fall on the floor", video: "gmdcsa24/Subject 3/Fall/18.mp4", roi: "s2_night.json",
+    note: "Expect ALERT (lying_outside_bed). With Azure configured the agent is asked too; Azure's content filter may refuse fall frames." },
+  { title: "Agent settles an unknown", video: "s3_seq1.mp4", roi: "s3_seq1.json",
+    note: "Start the server with UNKNOWN_ESCALATE_SEC=1 to see an agent trace: one VLM call resolves a 2 s unknown." },
+];
+
+let jobId, duration, segments, timer;
+
+async function loadSources() {
+  const { videos, rois } = await call("/analysis/sources");
+  $("video").innerHTML = videos.map((v) => `<option>${esc(v)}</option>`).join("");
+  $("roi").innerHTML = `<option value="">auto (same name as the video)</option>` + rois.map((r) => `<option>${esc(r)}</option>`).join("");
+  const available = DEMOS.filter((d) => videos.includes(d.video) && rois.includes(d.roi));
+  $("demos").innerHTML = available.length ? available.map((d, i) =>
+    `<div class="flex flex-col justify-between rounded border p-3 text-sm"><div><b>${esc(d.title)}</b><p class="mt-1 text-slate-500">${esc(d.note)}</p></div>
+     <button data-demo="${i}" class="mt-2 self-start rounded bg-slate-700 px-3 py-1 text-white hover:bg-slate-800">Run</button></div>`).join("")
+    : none("Demo files not found in data/videos and data/rois.");
+  $("demos").onclick = (e) => {
+    const d = available[e.target.dataset.demo];
+    if (!d) return;
+    $("vfile").value = $("rfile").value = "";
+    $("video").value = d.video;
+    $("roi").value = d.roi;
+    start();
+  };
+}
+
+async function start() {
+  const form = new FormData();
+  const upload = $("vfile").files[0];
+  if (upload) form.append("video", upload); else form.append("video_path", $("video").value);
+  if ($("rfile").files[0]) form.append("roi", $("rfile").files[0]);
+  else if ($("roi").value) form.append("roi_path", $("roi").value);
+  $("run").disabled = true;
+  $("results").classList.add("hidden");
+  try {
+    jobId = (await call("/analysis", { method: "POST", body: form })).job_id;
+    await poll();
+  } catch (e) {
+    $("status").textContent = e.message;
+    $("run").disabled = false;
+  }
+}
+
+async function poll() {
+  for (;;) {
+    const job = await call(`/analysis/${jobId}`);
+    $("bar").style.width = `${job.progress * 100}%`;
+    $("status").textContent = job.error ? `failed: ${job.error}` : `${job.status} (job ${jobId})`;
+    if (job.status === "failed") break;
+    if (job.status === "done") { await show(); break; }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+  $("run").disabled = false;
+}
+
+async function show() {
+  const get = (name) => call(`/analysis/${jobId}/${name}`);
+  const [summary, alerts, events, traces, result] = await Promise.all(["summary", "alerts", "events", "traces", "result"].map(get));
+  duration = result.duration_sec;
+
+  $("decision").className = `rounded px-3 py-1 text-lg font-semibold ${DECISIONS[alerts.overall_decision]}`;
+  $("decision").textContent = alerts.overall_decision;
+  const cards = [
+    ["Duration", summary.observation_duration_human], ["Bed exits", summary.bed_exit_count],
+    ["Bed returns", summary.bed_return_count], ["Final state", summary.final_state],
+    ["In bed", summary.total_in_bed_human], ["Out of bed", summary.total_out_of_bed_human],
+    ["Longest out of bed", summary.longest_out_of_bed_period_human], ["VLM calls / tokens", `${traces.llm_calls} / ${traces.total_tokens}`],
+  ];
+  $("cards").innerHTML = cards.map(([k, v]) => `<div><div class="text-xs text-slate-500">${k}</div><div class="font-medium">${esc(v)}</div></div>`).join("");
+
+  segments = result.segments;
+  $("timeline").innerHTML = segments.map((s) =>
+    `<div class="${COLORS[s.state]}" style="width:${((s.end_sec - s.start_sec) / duration) * 100}%"
+          title="${fmt(s.start_sec)}-${fmt(s.end_sec)} ${s.state}"></div>`).join("");
+  stop();
+  $("scrub").max = duration;
+  seek(0);
+  $("legend").innerHTML = Object.entries(COLORS).map(([s, c]) => `<span class="flex items-center gap-1"><i class="inline-block h-3 w-3 rounded ${c}"></i>${s}</span>`).join("");
+  $("segments").innerHTML = table(["From", "To", "State", "Confidence", "Reason"],
+    result.segments.map((s) => [fmt(s.start_sec), fmt(s.end_sec), esc(s.state), s.confidence.toFixed(2), esc(s.reason)]));
+
+  $("events").innerHTML = table(["Event", "Start", "Confirmed", "From", "To", "Confidence", "Decision"],
+    events.map((e) => [esc(e.event), e.start_time, e.confirmed_time, esc(e.previous_state), esc(e.current_state), e.confidence, badge(e.decision)]),
+    summary.total_out_of_bed_sec === 0
+      ? "No bed exit: the person never left the bed in this video."
+      : `No bed exit or return confirmed. The person was out of bed for ${summary.total_out_of_bed_human}, but an exit needs an away state (walking, sitting elsewhere, standing away from the bed) held for 5 s. Standing beside the bed and sitting back, or an unknown stretch, does not count.`);
+  $("alerts").innerHTML = table(["Time", "Decision", "Rule", "Evidence"],
+    alerts.decisions.map((d) => [d.time, badge(d.decision), esc(d.rule), `<code class="text-xs">${esc(JSON.stringify(d.evidence))}</code>`]),
+    "No rule fired, so the decision is NORMAL. Rules fire on a bed exit (MONITOR), lying outside the bed (ALERT), long edge sitting, a long unknown stretch, or a long absence.");
+  $("traces").innerHTML = traces.traces.length ? traces.traces.map((t) =>
+    `<details class="mb-2 rounded border p-2"><summary class="cursor-pointer text-sm">${esc(t.case.kind)} ${t.case.start_time}-${t.case.end_time}:
+       ${esc(t.finding.state)} (${t.finding.confidence}) <span class="text-slate-500">${esc(t.finding.rationale)}</span></summary>
+       <ol class="mt-2 list-decimal pl-6 text-sm">${t.steps.map((s) => `<li><b>${esc(s.tool)}</b> ${esc(s.observation)}</li>`).join("")}</ol></details>`).join("")
+    : none("The agent was not needed. It only runs for ambiguous cases: a long unknown stretch, lying outside the bed, a short or weak bed exit, a second person, or the person lost from view. It also needs Azure OpenAI set in .env.");
+
+  $("evaluation").innerHTML = "";
+  $("results").classList.remove("hidden");
+}
+
+// Shows the video frame at time t (a JPEG from the server: stitched files may use a codec browsers cannot play)
+// next to the state the system predicted for that moment.
+function seek(t) {
+  t = Math.min(Math.max(t, 0), duration);
+  $("scrub").value = t;
+  $("head").style.left = `${(t / duration) * 100}%`;
+  $("frame").src = `${API}/analysis/${jobId}/frame?t=${t.toFixed(2)}`;
+  const s = segments.find((x) => t >= x.start_sec && t < x.end_sec) || segments[segments.length - 1];
+  $("at").textContent = `${fmt(t)}  ${s.state}${s.reason ? ` (${s.reason})` : ""}`;
+}
+
+function stop() {
+  clearInterval(timer);
+  timer = null;
+  $("play").textContent = "Play";
+}
+
+function togglePlay() {
+  if (timer) return stop();
+  $("play").textContent = "Pause";
+  timer = setInterval(() => {
+    const next = Number($("scrub").value) + 0.2; // the analysis samples at 5 fps
+    if (next > duration) return stop();
+    seek(next);
+  }, 200);
+}
+
+async function evaluate() {
+  const form = new FormData();
+  if ($("gt").files[0]) form.append("ground_truth", $("gt").files[0]);
+  try {
+    const r = await call(`/evaluation/${jobId}`, { method: "POST", body: form });
+    const ev = (k) => `${r.events[k].matched} matched / ${r.events[k].predicted} predicted / ${r.events[k].ground_truth} true`;
+    $("evaluation").innerHTML = `
+      <p class="text-sm">Frame accuracy <b>${pct(r.frame_accuracy)}</b> over ${r.frames_evaluated} frames. Bed exit: ${ev("bed_exit")}. Return: ${ev("return_to_bed")}. False exits: ${r.events.false_bed_exits}.</p>
+      ${table(["State", "Precision", "Recall", "Support"], Object.entries(r.per_class).map(([s, m]) => [esc(s), pct(m.precision), pct(m.recall), m.support]))}`;
+  } catch (e) {
+    $("evaluation").innerHTML = `<p class="text-sm text-red-600">${esc(e.message)}</p>`;
+  }
+}
+
+$("run").onclick = start;
+$("scrub").oninput = (e) => seek(Number(e.target.value));
+$("timeline").parentElement.onclick = (e) => {
+  const box = e.currentTarget.getBoundingClientRect();
+  seek(((e.clientX - box.left) / box.width) * duration);
+};
+$("play").onclick = togglePlay;
+$("evaluate").onclick = evaluate;
+loadSources().catch((e) => ($("status").textContent = e.message));
+</script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+More than one person is visible. Is the second person a caregiver or visitor? Which one is the monitored person (the one who was in the bed)? Answer with the state of the monitored person only, and mention the other person in the rationale.

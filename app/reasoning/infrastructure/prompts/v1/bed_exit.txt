@@ -1,0 +1,1 @@
+The pose analysis thinks the person left the bed, but the evidence is short or weak. Did they really leave the bed and move away, or did they only stand up briefly and sit or lie back down? Set exit_confirmed to true if they left the bed, false if they stayed at the bed, null if you cannot tell. Set state to unknown.
